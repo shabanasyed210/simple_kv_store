@@ -1,100 +1,77 @@
 import os
+import sys
 
 DATA_FILE = "data.db"
 
-# ---------------------------
-# Load existing data from disk
-# ---------------------------
 def load_data():
     data = []
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
             for line in f:
-                parts = line.strip().split(" ", 2)
-                if len(parts) == 3 and parts[0] == "SET":
+                parts = line.rstrip("\n").split(" ", 2)
+                if len(parts) == 3 and parts[0].upper() == "SET":
                     key, value = parts[1], parts[2]
                     data.append((key, value))
     return data
 
-
-# ---------------------------
-# Save a new SET command
-# ---------------------------
 def append_to_file(key, value):
+    # Append and force to disk immediately
     with open(DATA_FILE, "a") as f:
         f.write(f"SET {key} {value}\n")
+        f.flush()
+        os.fsync(f.fileno())
 
-
-# ---------------------------
-# Build in-memory index (no dicts allowed)
-# ---------------------------
-def build_index(data):
-    index = []  # list of (key, value)
-    for key, value in data:
-        # if key already exists, replace old value
-        found = False
-        for i, (k, v) in enumerate(index):
+def build_index(pairs):
+    index = []  # list[(key, value)]
+    for key, value in pairs:
+        replaced = False
+        for i, (k, _) in enumerate(index):
             if k == key:
                 index[i] = (key, value)
-                found = True
+                replaced = True
                 break
-        if not found:
+        if not replaced:
             index.append((key, value))
     return index
 
-
-# ---------------------------
-# Find value for a key
-# ---------------------------
 def get_value(index, key):
     for k, v in index:
         if k == key:
             return v
     return None
 
-
-# ---------------------------
-# Main program loop
-# ---------------------------
 def main():
-    data = load_data()
-    index = build_index(data)
+    index = build_index(load_data())
 
-    print("Simple Key-Value Store started. Type SET <key> <value> or GET <key>.")
-    while True:
-        try:
-            command = input("> ").strip()
-            if not command:
-                continue
+    # Read commands strictly from STDIN; output ONLY for GET
+    for raw in sys.stdin:
+        line = raw.strip()
+        if not line:
+            continue
 
-            parts = command.split(" ", 2)
-            cmd = parts[0].upper()
+        parts = line.split(" ", 2)
+        cmd = parts[0].upper()
 
-            if cmd == "SET" and len(parts) == 3:
-                key, value = parts[1], parts[2]
-                append_to_file(key, value)
-                index = build_index(load_data())
-                print("OK")
+        if cmd == "SET" and len(parts) == 3:
+            key, value = parts[1], parts[2]
+            append_to_file(key, value)
+            # update in-memory index without full reload
+            updated = False
+            for i, (k, _) in enumerate(index):
+                if k == key:
+                    index[i] = (key, value)
+                    updated = True
+                    break
+            if not updated:
+                index.append((key, value))
+            # no output for SET
 
-            elif cmd == "GET" and len(parts) == 2:
-                key = parts[1]
-                value = get_value(index, key)
-                if value is not None:
-                    print(value)
-                else:
-                    print("NULL")
+        elif cmd == "GET" and len(parts) == 2:
+            val = get_value(index, parts[1])
+            print(val if val is not None else "NULL")
 
-            elif cmd == "EXIT":
-                print("Exiting...")
-                break
-
-            else:
-                print("Invalid command. Use SET <key> <value>, GET <key>, or EXIT.")
-
-        except KeyboardInterrupt:
-            print("\nExiting...")
+        elif cmd == "EXIT":
             break
-
 
 if __name__ == "__main__":
     main()
